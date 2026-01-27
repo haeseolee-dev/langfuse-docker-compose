@@ -22,7 +22,7 @@ on:
 
 jobs:
   deploy:
-    runs-on: arc-rs-cloudtr
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout Source Code repository
         uses: actions/checkout@v3
