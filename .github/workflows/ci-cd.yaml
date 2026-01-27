@@ -34,6 +34,7 @@ jobs:
         run: |
           set -euo pipefail
 
+          TARGET_HOST=20.214.145.17
           TARGET_HOST_PASSWORD="${{ secrets.TARGET_HOST_PASSWORD }}"
 
           REDIS_PASSWORD="${{ secrets.REDIS_PASSWORD }}"
