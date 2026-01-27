@@ -74,10 +74,10 @@ services:
     image: langfuse/langfuse:3.146.0
     container_name: langfuse
     depends_on:
-      langfuse-postgres:
-        condition: service_healthy
-      langfuse-redis:
-        condition: service_healthy
+      # langfuse-postgres:
+      #   condition: service_healthy
+      # langfuse-redis:
+      #   condition: service_healthy
       langfuse-clickhouse:
         condition: service_healthy
       langfuse-minio:
