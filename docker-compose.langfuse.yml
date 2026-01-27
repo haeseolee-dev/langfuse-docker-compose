@@ -1,0 +1,111 @@
+version: "3.8"
+
+services:
+  langfuse-minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    container_name: langfuse-minio
+    entrypoint: sh
+    # create the 'langfuse' bucket before starting the service
+    command: -c 'mkdir -p /data/langfuse && minio server --address ":9000" --console-address ":9001" /data'
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-miniosecret}
+    volumes:
+      - langfuse_minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 1s
+      timeout: 5s
+      retries: 5
+      start_period: 1s
+    networks:
+      - autobuilder-network
+
+  langfuse-clickhouse:
+    image: clickhouse/clickhouse-server:25.12.3
+    container_name: langfuse-clickhouse
+    environment:
+      # ClickHouse init 메커니즘(/docker-entrypoint-initdb.d)로 langfuse DB/user/grants를 1회 초기화
+      # - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
+      - CLICKHOUSE_DB=${CLICKHOUSE_DB:-langfuse}
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-langfuse}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
+    healthcheck:
+      # "서버 기동"뿐 아니라 "langfuse 유저/비번이 실제로 먹혔는지"까지 확인해야
+      # langfuse 마이그레이션에서 code:516(인증) 레이스를 피할 수 있다.
+      # NOTE: docker compose가 호스트 변수로 치환하지 않도록 $$로 이스케이프
+      test:
+        [
+          "CMD-SHELL",
+          'clickhouse-client --host 127.0.0.1 --user "$${CLICKHOUSE_USER}" --password "$${CLICKHOUSE_PASSWORD}" -q "SELECT 1" >/dev/null 2>&1',
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 20s
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    volumes:
+      - langfuse_clickhouse_data:/var/lib/clickhouse
+      - ${LANGFUSE_CLICKHOUSE_INIT_DIR:-/data/langfuse_clickhouse_init}:/docker-entrypoint-initdb.d:ro
+      # native TCP(9000)가 컨테이너 외부에서도 열리도록 listen_host 오버라이드
+      # (로컬 개발은 LANGFUSE_CLICKHOUSE_LISTEN_CONFIG=./docker/clickhouse/10-listen.xml 로 오버라이드해서 사용)
+      - ${LANGFUSE_CLICKHOUSE_LISTEN_CONFIG:-/data/langfuse_clickhouse_conf/10-listen.xml}:/etc/clickhouse-server/config.d/10-listen.xml:ro
+    restart: unless-stopped
+    networks:
+      - autobuilder-network
+
+  # Background worker (queues, ingestion processing, blob storage integration)
+  langfuse-worker:
+    image: langfuse/langfuse-worker:3.146.0
+    container_name: langfuse-worker
+    depends_on:
+      langfuse-clickhouse:
+        condition: service_healthy
+    env_file:
+      - .env.${ENVIRONMENT}
+    restart: unless-stopped
+    networks:
+      - autobuilder-network
+
+  # Web/UI + API
+  langfuse:
+    image: langfuse/langfuse:3.146.0
+    container_name: langfuse
+    depends_on:
+      langfuse-clickhouse:
+        condition: service_healthy
+    ports:
+      # NOTE: 컨테이너 내부 포트는 3000(고정)
+      - "${LANGFUSE_PORT:-19001}:3000"
+    env_file:
+      - .env.${ENVIRONMENT}
+    environment:
+      # Storage (기존 DB/Redis 재사용)
+      # 단일 ClickHouse 컨테이너 구성에서는 ON CLUSTER 실행이 실패할 수 있어 비활성화 권장
+      - CLICKHOUSE_CLUSTER_ENABLED=false
+      - CLICKHOUSE_MIGRATION_SSL=false
+    restart: unless-stopped
+    networks:
+      - autobuilder-network
+
+networks:
+  autobuilder-network:
+    external: true
+
+volumes:
+  langfuse_clickhouse_data:
+    driver: local
+    driver_opts:
+      type: "none"
+      o: "bind"
+      device: "/data/langfuse_clickhouse"
+
+  langfuse_minio_data:
+    driver: local
+    driver_opts:
+      type: "none"
+      o: "bind"
+      device: "/data/langfuse_minio"

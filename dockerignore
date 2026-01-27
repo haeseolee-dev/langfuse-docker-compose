@@ -1,0 +1,58 @@
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info
+dist
+build
+
+# Virtual Environment
+.venv
+venv/
+ENV/
+env/
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+.env
+.env.*
+!.env.local
+.env.dev
+.env.prod
+*.log
+logs/
+uploads/
+.mypy_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Git
+.git
+.gitignore
+
+# Docker
+Dockerfile
+docker-compose.local.yml
+docker-compose.dev.yml
+.dockerignore
+
+# Documentation
+docs/
+*.md
+!README.md
+/uploads/

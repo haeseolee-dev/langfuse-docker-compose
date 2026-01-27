@@ -1,0 +1,244 @@
+name: langfuse-stack-ci-cd
+
+env:
+  BRANCH: ${{ github.ref_name }}
+
+  # Target Host
+  TARGET_HOST_PORT: ${{ vars.TARGET_SSH_PORT }}
+  TARGET_HOST_USER: ${{ vars.TARGET_SSH_USER }}
+
+  ENVIRONMENT: ${{ github.ref_name == 'main' && 'prod' || 'dev' }}
+  USE_MINIO: ${{ vars.LANGFUSE_USE_MINIO != '' && vars.LANGFUSE_USE_MINIO || 'true' }}
+
+permissions:
+  id-token: write
+  contents: read
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: arc-rs-cloudtr
+    steps:
+      - name: Checkout Source Code repository
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ env.BRANCH }}
+          fetch-depth: 1
+
+      - name: Retrieve secrets from GitHub Actions (Langfuse stack)
+        shell: bash
+        run: |
+          set -e
+
+          TARGET_HOST="20.214.145.17"
+          TARGET_HOST_PASSWORD="${{ secrets.TARGET_HOST_PASSWORD }}"
+
+          REDIS_PASSWORD="${{ secrets.REDIS_PASSWORD }}"
+          LANGFUSE_POSTGRES_PASSWORD="${{ secrets.LANGFUSE_POSTGRES_PASSWORD }}"
+
+          LANGFUSE_NEXTAUTH_SECRET="${{ secrets.LANGFUSE_NEXTAUTH_SECRET }}"
+          LANGFUSE_SALT="${{ secrets.LANGFUSE_SALT }}"
+          LANGFUSE_CLICKHOUSE_PASSWORD="${{ secrets.LANGFUSE_CLICKHOUSE_PASSWORD }}"
+
+          # Required by Langfuse (auto-generate if empty)
+          LANGFUSE_ENCRYPTION_KEY="${{ secrets.LANGFUSE_ENCRYPTION_KEY }}"
+          if [ -z "$LANGFUSE_ENCRYPTION_KEY" ]; then
+            LANGFUSE_ENCRYPTION_KEY="$(openssl rand -hex 32)"
+          fi
+
+          if [ "${{ env.USE_MINIO }}" = "true" ]; then
+            LANGFUSE_MINIO_ROOT_PASSWORD="${{ secrets.LANGFUSE_MINIO_ROOT_PASSWORD }}"
+            if [ -z "$LANGFUSE_MINIO_ROOT_PASSWORD" ]; then
+              LANGFUSE_MINIO_ROOT_PASSWORD="$LANGFUSE_CLICKHOUSE_PASSWORD"
+            fi
+            LANGFUSE_AZURE_STORAGE_ACCOUNT_NAME=""
+            LANGFUSE_AZURE_STORAGE_ACCOUNT_KEY=""
+          else
+            LANGFUSE_AZURE_STORAGE_ACCOUNT_NAME="${{ secrets.LANGFUSE_AZURE_STORAGE_ACCOUNT_NAME }}"
+            LANGFUSE_AZURE_STORAGE_ACCOUNT_KEY="${{ secrets.LANGFUSE_AZURE_STORAGE_ACCOUNT_KEY }}"
+            LANGFUSE_MINIO_ROOT_PASSWORD=""
+          fi
+
+          # mask
+          echo "::add-mask::$TARGET_HOST"
+          echo "::add-mask::$TARGET_HOST_PASSWORD"
+          echo "::add-mask::$REDIS_PASSWORD"
+          echo "::add-mask::$LANGFUSE_POSTGRES_PASSWORD"
+          echo "::add-mask::$LANGFUSE_NEXTAUTH_SECRET"
+          echo "::add-mask::$LANGFUSE_SALT"
+          echo "::add-mask::$LANGFUSE_CLICKHOUSE_PASSWORD"
+          echo "::add-mask::$LANGFUSE_ENCRYPTION_KEY"
+          echo "::add-mask::$LANGFUSE_MINIO_ROOT_PASSWORD"
+          echo "::add-mask::$LANGFUSE_AZURE_STORAGE_ACCOUNT_NAME"
+          echo "::add-mask::$LANGFUSE_AZURE_STORAGE_ACCOUNT_KEY"
+
+          echo "TARGET_HOST=$TARGET_HOST" >> $GITHUB_ENV
+          echo "TARGET_HOST_PASSWORD=$TARGET_HOST_PASSWORD" >> $GITHUB_ENV
+          echo "REDIS_PASSWORD=$REDIS_PASSWORD" >> $GITHUB_ENV
+          echo "LANGFUSE_POSTGRES_PASSWORD=$LANGFUSE_POSTGRES_PASSWORD" >> $GITHUB_ENV
+          echo "LANGFUSE_NEXTAUTH_SECRET=$LANGFUSE_NEXTAUTH_SECRET" >> $GITHUB_ENV
+          echo "LANGFUSE_SALT=$LANGFUSE_SALT" >> $GITHUB_ENV
+          echo "LANGFUSE_CLICKHOUSE_PASSWORD=$LANGFUSE_CLICKHOUSE_PASSWORD" >> $GITHUB_ENV
+          echo "LANGFUSE_ENCRYPTION_KEY=$LANGFUSE_ENCRYPTION_KEY" >> $GITHUB_ENV
+          echo "LANGFUSE_MINIO_ROOT_PASSWORD=$LANGFUSE_MINIO_ROOT_PASSWORD" >> $GITHUB_ENV
+          echo "LANGFUSE_AZURE_STORAGE_ACCOUNT_NAME=$LANGFUSE_AZURE_STORAGE_ACCOUNT_NAME" >> $GITHUB_ENV
+          echo "LANGFUSE_AZURE_STORAGE_ACCOUNT_KEY=$LANGFUSE_AZURE_STORAGE_ACCOUNT_KEY" >> $GITHUB_ENV
+
+      - name: Build Langfuse env file (.env.${{ env.ENVIRONMENT }})
+        shell: bash
+        run: |
+          set -e
+          ENV_FILE=".env.${{ env.ENVIRONMENT }}"
+          rm -f "$ENV_FILE"
+
+          {
+            echo "ENVIRONMENT=${{ env.ENVIRONMENT }}"
+            echo "USE_MINIO=${{ env.USE_MINIO }}"
+            echo "NODE_ENV=production"
+
+            echo "LANGFUSE_PORT=19001"
+            echo "NEXTAUTH_URL=http://${{ env.TARGET_HOST }}:19001"
+            echo "NEXTAUTH_SECRET=${{ env.LANGFUSE_NEXTAUTH_SECRET }}"
+            echo "SALT=${{ env.LANGFUSE_SALT }}"
+            echo "ENCRYPTION_KEY=${{ env.LANGFUSE_ENCRYPTION_KEY }}"
+            echo "TELEMETRY_ENABLED=false"
+
+            echo "DATABASE_URL=postgresql://langfuse:${{ env.LANGFUSE_POSTGRES_PASSWORD }}@cms-postgres:5432/langfuse"
+
+            # Redis (Langfuse/worker queue + caching)
+            echo "REDIS_HOST=cms-redis"
+            echo "REDIS_PORT=6379"
+            echo "REDIS_AUTH=${{ env.REDIS_PASSWORD }}"
+            echo "REDIS_TLS_ENABLED=false"
+
+            # ClickHouse
+            echo "CLICKHOUSE_URL=http://langfuse-clickhouse:8123"
+            echo "CLICKHOUSE_MIGRATION_URL=clickhouse://langfuse-clickhouse:9000"
+            echo "CLICKHOUSE_USER=langfuse"
+            echo "CLICKHOUSE_DB=langfuse"
+            echo "CLICKHOUSE_PASSWORD=${{ env.LANGFUSE_CLICKHOUSE_PASSWORD }}"
+            echo "CLICKHOUSE_CLUSTER_ENABLED=false"
+
+            # Storage backend selection (explicit)
+            if [ "${{ env.USE_MINIO }}" = "true" ]; then
+              echo "MINIO_ROOT_USER=minio"
+              echo "MINIO_ROOT_PASSWORD=${{ env.LANGFUSE_MINIO_ROOT_PASSWORD }}"
+              echo "LANGFUSE_USE_AZURE_BLOB=false"
+
+              echo "LANGFUSE_S3_EVENT_UPLOAD_BUCKET=langfuse"
+              echo "LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT=http://langfuse-minio:9000"
+              echo "LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID=minio"
+              echo "LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY=${{ env.LANGFUSE_MINIO_ROOT_PASSWORD }}"
+              echo "LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE=true"
+              echo "LANGFUSE_S3_EVENT_UPLOAD_PREFIX=events/"
+
+              echo "LANGFUSE_S3_MEDIA_UPLOAD_BUCKET=langfuse"
+              echo "LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT=http://langfuse-minio:9000"
+              echo "LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID=minio"
+              echo "LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY=${{ env.LANGFUSE_MINIO_ROOT_PASSWORD }}"
+              echo "LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE=true"
+              echo "LANGFUSE_S3_MEDIA_UPLOAD_PREFIX=media/"
+            else
+              echo "LANGFUSE_USE_AZURE_BLOB=true"
+              echo "LANGFUSE_S3_EVENT_UPLOAD_BUCKET=langfuse"
+              echo "LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT=https://${{ env.LANGFUSE_AZURE_STORAGE_ACCOUNT_NAME }}.blob.core.windows.net"
+              echo "LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID=${{ env.LANGFUSE_AZURE_STORAGE_ACCOUNT_NAME }}"
+              echo "LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY=${{ env.LANGFUSE_AZURE_STORAGE_ACCOUNT_KEY }}"
+              echo "LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE=false"
+              echo "LANGFUSE_S3_EVENT_UPLOAD_PREFIX=events/"
+
+              echo "LANGFUSE_S3_MEDIA_UPLOAD_BUCKET=langfuse"
+              echo "LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT=https://${{ env.LANGFUSE_AZURE_STORAGE_ACCOUNT_NAME }}.blob.core.windows.net"
+              echo "LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID=${{ env.LANGFUSE_AZURE_STORAGE_ACCOUNT_NAME }}"
+              echo "LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY=${{ env.LANGFUSE_AZURE_STORAGE_ACCOUNT_KEY }}"
+              echo "LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE=false"
+              echo "LANGFUSE_S3_MEDIA_UPLOAD_PREFIX=media/"
+            fi
+          } >> "$ENV_FILE"
+
+          echo "Env file created: $ENV_FILE"
+
+      - name: Upload Langfuse Compose + init scripts + env to Target Server via SCP
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ env.TARGET_HOST }}
+          username: ${{ env.TARGET_HOST_USER }}
+          password: ${{ env.TARGET_HOST_PASSWORD }}
+          port: ${{ env.TARGET_HOST_PORT }}
+          source: "docker-compose.langfuse.yml,docker/init,docker/clickhouse,.env.${{ env.ENVIRONMENT }}"
+          target: "~/deploy/langfuse"
+
+      - name: Deploy Langfuse Stack on Target Host
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ env.TARGET_HOST }}
+          username: ${{ env.TARGET_HOST_USER }}
+          password: ${{ env.TARGET_HOST_PASSWORD }}
+          port: ${{ env.TARGET_HOST_PORT }}
+          script: |
+            set -e
+            mkdir -p ~/deploy/langfuse
+            cd ~/deploy/langfuse
+
+            # Docker TLS 인증서 설정 (Permission denied 방지: 항상 리셋 + sudo로 리다이렉션)
+            sudo rm -rf .docker
+            mkdir -p .docker
+            sudo sh -c "printf %s \"$DOCKER_CA_PEM_B64\" | base64 -d > .docker/ca.pem"
+            sudo sh -c "printf %s \"$DOCKER_CLIENT_CERT_PEM_B64\" | base64 -d > .docker/cert.pem"
+            sudo sh -c "printf %s \"$DOCKER_CLIENT_KEY_PEM_B64\" | base64 -d > .docker/key.pem"
+            sudo chmod 400 .docker/key.pem
+            sudo chmod 444 .docker/ca.pem .docker/cert.pem
+
+            DOCKER="sudo ENVIRONMENT=${{ env.ENVIRONMENT }} docker"
+
+            sudo mkdir -p /data/langfuse_clickhouse
+            sudo chown -R 101:101 /data/langfuse_clickhouse
+
+            # MinIO data directory (bind volume under /data)
+            sudo mkdir -p /data/langfuse_minio
+            # chainguard/minio는 보통 non-root(65532)로 동작. 권한 문제 방지용
+            sudo chown -R 65532:65532 /data/langfuse_minio || true
+
+            # ClickHouse listen_host override는 영속 경로에 보관 (deploy 폴더 정리해도 재시작 안정)
+            sudo mkdir -p /data/langfuse_clickhouse_conf
+            sudo cp -f docker/clickhouse/10-listen.xml /data/langfuse_clickhouse_conf/10-listen.xml
+
+            # ClickHouse init scripts는 deploy 폴더가 아니라 영속 경로에 보관 (재시작 시 마운트 경로 유실 방지)
+            sudo mkdir -p /data/langfuse_clickhouse_init
+            # init 스크립트가 여러 개로 늘어나도 누락되지 않게 디렉토리 전체를 동기화
+            sudo cp -a docker/init/. /data/langfuse_clickhouse_init/
+            sudo chmod +x /data/langfuse_clickhouse_init/*.sh || true
+
+            # 사전조건: cms-postgres / cms-redis
+            if ! $DOCKER ps --format '{{.Names}}' | grep -qx 'cms-postgres'; then
+              echo "ERROR: cms-postgres is not running. Run DB/app pipeline first." >&2
+              exit 1
+            fi
+            if ! $DOCKER ps --format '{{.Names}}' | grep -qx 'cms-redis'; then
+              echo "ERROR: cms-redis is not running. Run DB/app pipeline first." >&2
+              exit 1
+            fi
+
+            echo "Deploying ClickHouse (first) ..."
+            $DOCKER compose -p ${{ env.ENVIRONMENT }}-langfuse --env-file .env.${{ env.ENVIRONMENT }} -f docker-compose.langfuse.yml up -d --force-recreate langfuse-clickhouse
+
+            # echo "Ensuring ClickHouse DB/user/grants (idempotent) ..."
+            # $DOCKER exec langfuse-clickhouse sh -lc '/docker-entrypoint-initdb.d/01-langfuse.sh'
+
+            if [ "${{ env.USE_MINIO }}" = "true" ]; then
+              echo "Deploying MinIO (storage backend) ..."
+              $DOCKER compose -p ${{ env.ENVIRONMENT }}-langfuse --env-file .env.${{ env.ENVIRONMENT }} -f docker-compose.langfuse.yml up -d --force-recreate langfuse-minio
+            fi
+
+            echo "Deploying Langfuse (web + worker) ..."
+            $DOCKER compose -p ${{ env.ENVIRONMENT }}-langfuse --env-file .env.${{ env.ENVIRONMENT }} -f docker-compose.langfuse.yml up -d --force-recreate langfuse-worker langfuse
+
+            # Clean up
+            sudo rm -rf .docker
+            rm -f .env.${{ env.ENVIRONMENT }}
+            sudo rm -rf docker/

@@ -1,0 +1,9 @@
+<clickhouse>
+  <!--
+    다른 컨테이너(=langfuse)가 clickhouse://(native TCP 9000) 로 접속해야 하므로
+    listen_host 를 localhost 가 아닌 all interfaces 로 열어준다.
+  -->
+  <listen_host>0.0.0.0</listen_host>
+  <listen_host>::</listen_host>
+</clickhouse>
+
