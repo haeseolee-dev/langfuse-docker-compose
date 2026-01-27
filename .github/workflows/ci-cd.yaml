@@ -3,7 +3,7 @@ name: langfuse-stack-ci-cd
 env:
   BRANCH: ${{ github.ref_name }}
 
-  TARGET_HOST: ${{ vars.TARGET_HOST }}
+  TARGET_HOST: 20.214.145.17
   TARGET_HOST_PORT: ${{ vars.TARGET_SSH_PORT }}
   TARGET_HOST_USER: ${{ vars.TARGET_SSH_USER }}
 
@@ -34,7 +34,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          TARGET_HOST=20.214.145.17
           TARGET_HOST_PASSWORD="${{ secrets.TARGET_HOST_PASSWORD }}"
 
           REDIS_PASSWORD="${{ secrets.REDIS_PASSWORD }}"
