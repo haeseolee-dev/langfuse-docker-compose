@@ -46,7 +46,6 @@ services:
       - langfuse_clickhouse_data:/var/lib/clickhouse
       - ${LANGFUSE_CLICKHOUSE_INIT_DIR:-/data/langfuse_clickhouse_init}:/docker-entrypoint-initdb.d:ro
       - ${LANGFUSE_CLICKHOUSE_LISTEN_CONFIG:-/data/langfuse_clickhouse_conf/10-listen.xml}:/etc/clickhouse-server/config.d/10-listen.xml:ro
-      - /data/langfuse_clickhouse_conf:/etc/clickhouse-server/config.d:ro
     restart: unless-stopped
     networks:
       - autobuilder-network

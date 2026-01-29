@@ -219,8 +219,8 @@ jobs:
             done
 
             # Force update PostgreSQL password (fixes authentication issues with existing data volumes)
-            echo "Updating PostgreSQL password..."
-            $DOCKER exec langfuse-postgres psql -U langfuse -d postgres -c "ALTER USER langfuse WITH PASSWORD '${{ env.LANGFUSE_POSTGRES_PASSWORD }}';" || echo "Warning: Failed to update PostgreSQL password, continuing..."
+            # echo "Updating PostgreSQL password..."
+            # $DOCKER exec langfuse-postgres psql -U langfuse -d postgres -c "ALTER USER langfuse WITH PASSWORD '${{ env.LANGFUSE_POSTGRES_PASSWORD }}';" || echo "Warning: Failed to update PostgreSQL password, continuing..."
 
             echo "=== Phase 1: ClickHouse first (and wait healthy) ==="
             $DOCKER compose -p "$PROJECT" --env-file "$ENV_FILE" -f docker-compose.langfuse.yml up -d --force-recreate langfuse-clickhouse
