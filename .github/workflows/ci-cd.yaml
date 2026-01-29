@@ -3,6 +3,9 @@ name: langfuse-stack-ci-cd
 env:
   BRANCH: ${{ github.ref_name }}
 
+  REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+  LANGFUSE_POSTGRES_PASSWORD: ${{ secrets.LANGFUSE_POSTGRES_PASSWORD }}
+
   TARGET_HOST: 20.214.145.17
   TARGET_HOST_PORT: ${{ vars.TARGET_SSH_PORT }}
   TARGET_HOST_USER: ${{ vars.TARGET_SSH_USER }}
@@ -35,9 +38,6 @@ jobs:
           set -euo pipefail
 
           TARGET_HOST_PASSWORD="${{ secrets.TARGET_HOST_PASSWORD }}"
-
-          REDIS_PASSWORD="${{ secrets.REDIS_PASSWORD }}"
-          LANGFUSE_POSTGRES_PASSWORD="${{ secrets.LANGFUSE_POSTGRES_PASSWORD }}"
 
           LANGFUSE_NEXTAUTH_SECRET="${{ secrets.LANGFUSE_NEXTAUTH_SECRET }}"
           LANGFUSE_SALT="${{ secrets.LANGFUSE_SALT }}"
@@ -104,9 +104,9 @@ jobs:
             echo "ENCRYPTION_KEY=${{ env.LANGFUSE_ENCRYPTION_KEY }}"
             echo "TELEMETRY_ENABLED=false"
 
+            echo "REDIS_PASSWORD=${{ env.REDIS_PASSWORD }}"
             echo "DATABASE_URL=postgresql://langfuse:${{ env.LANGFUSE_POSTGRES_PASSWORD }}@langfuse-postgres:5432/langfuse?schema=public"
 
-            echo "REDIS_URL=redis://:${{ env.REDIS_PASSWORD }}@langfuse-redis:6379"
             echo "REDIS_CONNECTION_STRING=redis://:${{ env.REDIS_PASSWORD }}@langfuse-redis:6379"
             echo "REDIS_TLS_ENABLED=false"
 
