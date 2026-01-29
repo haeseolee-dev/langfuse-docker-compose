@@ -23,11 +23,13 @@ services:
   langfuse-redis:
     image: redis:7-alpine
     container_name: langfuse-redis
-    command: ["redis-server", "--appendonly", "yes"]
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:-redissecret}"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-redissecret}
     volumes:
       - langfuse_redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redissecret}", "ping"]
       interval: 3s
       timeout: 5s
       retries: 30

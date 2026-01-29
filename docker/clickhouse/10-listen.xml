@@ -4,5 +4,7 @@
     listen_host 를 localhost 가 아닌 all interfaces 로 열어준다.
   -->
   <listen_host>0.0.0.0</listen_host>
+  <tcp_port>9000</tcp_port>
+  <http_port>8123</http_port>
 </clickhouse>
 

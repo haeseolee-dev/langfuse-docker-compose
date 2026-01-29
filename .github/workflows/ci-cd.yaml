@@ -107,6 +107,7 @@ jobs:
             echo "DATABASE_URL=postgresql://langfuse:${{ env.LANGFUSE_POSTGRES_PASSWORD }}@langfuse-postgres:5432/langfuse?schema=public"
 
             echo "REDIS_URL=redis://:${{ env.REDIS_PASSWORD }}@langfuse-redis:6379"
+            echo "REDIS_CONNECTION_STRING=redis://:${{ env.REDIS_PASSWORD }}@langfuse-redis:6379"
             echo "REDIS_TLS_ENABLED=false"
 
             echo "CLICKHOUSE_URL=http://langfuse-clickhouse:8123"
@@ -200,6 +201,26 @@ jobs:
 
             echo "=== Phase 0: DB services (postgres + redis) ==="
             $DOCKER compose -p "$PROJECT" --env-file "$ENV_FILE" -f docker-compose.db.yml up -d
+
+            # Wait for PostgreSQL to become healthy
+            echo "Waiting for PostgreSQL to become healthy..."
+            for i in $(seq 1 60); do
+              status="$($DOCKER inspect -f '{{.State.Health.Status}}' langfuse-postgres 2>/dev/null || echo 'unknown')"
+              if [ "$status" = "healthy" ]; then
+                echo "PostgreSQL is healthy."
+                break
+              fi
+              if [ "$i" -eq 60 ]; then
+                echo "ERROR: PostgreSQL did not become healthy in time." >&2
+                $DOCKER logs --tail 200 langfuse-postgres || true
+                exit 1
+              fi
+              sleep 2
+            done
+
+            # Force update PostgreSQL password (fixes authentication issues with existing data volumes)
+            echo "Updating PostgreSQL password..."
+            $DOCKER exec langfuse-postgres psql -U langfuse -d postgres -c "ALTER USER langfuse WITH PASSWORD '${{ env.LANGFUSE_POSTGRES_PASSWORD }}';" || echo "Warning: Failed to update PostgreSQL password, continuing..."
 
             echo "=== Phase 1: ClickHouse first (and wait healthy) ==="
             $DOCKER compose -p "$PROJECT" --env-file "$ENV_FILE" -f docker-compose.langfuse.yml up -d --force-recreate langfuse-clickhouse
